@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>現場互動投票</title>
+<style>
+  :root{
+    --bg: #14121a;
+    --panel: #1d1a26;
+    --ink: #f4f1ea;
+    --muted: #9b94ab;
+    --a: #ef5f5f;   /* 珊瑚紅 */
+    --b: #f0a93f;   /* 琥珀黃 */
+    --c: #3fb88f;   /* 青綠 */
+    --d: #6f7bd4;   /* 紫藍 */
+    --line: rgba(244,241,234,0.10);
+  }
+  *{ box-sizing: border-box; }
+  html, body{
+    margin:0; padding:0; height:100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "PingFang TC","Noto Sans TC","Microsoft JhengHei",-apple-system,BlinkMacSystemFont,sans-serif;
+    overflow-x:hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #root{ min-height:100vh; }
+
+  /* ===== 共用 ===== */
+  .center-screen{
+    min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+    padding: 32px 24px;
+  }
+  .eyebrow{
+    font-size:13px; letter-spacing:0.18em; color:var(--muted);
+    text-transform:uppercase; margin-bottom:14px; font-weight:600;
+  }
+  .big-title{
+    font-size: clamp(22px, 5vw, 40px);
+    font-weight:800; line-height:1.3; margin:0 0 8px;
+  }
+  .sub{ color:var(--muted); font-size:15px; line-height:1.6; max-width:480px; }
+  .spinner{
+    width:34px; height:34px; border-radius:50%;
+    border:3px solid var(--line); border-top-color: var(--c);
+    animation: spin 0.9s linear infinite; margin-top:22px;
+  }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+  .pulse-dot{
+    width:8px; height:8px; border-radius:50%; background:var(--c);
+    display:inline-block; margin-right:8px;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.25; } }
+
+  /* ===== 來賓：投票色塊 ===== */
+  .guest-wrap{ min-height:100vh; display:flex; flex-direction:column; }
+  .guest-topbar{
+    padding: 16px 20px 10px; text-align:center; flex-shrink:0;
+  }
+  .guest-qnum{ font-size:12px; color:var(--muted); letter-spacing:0.12em; text-transform:uppercase; font-weight:700; }
+  .guest-qtext{
+    font-size: clamp(17px, 4.6vw, 22px); font-weight:800; margin-top:6px; line-height:1.4;
+    padding: 0 6px;
+  }
+  .grid4{
+    flex:1; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr;
+    gap:10px; padding:10px; min-height: 60vh;
+  }
+  .block{
+    border:none; border-radius:18px; cursor:pointer;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:6px; -webkit-tap-highlight-color: transparent;
+    transition: transform 0.12s ease, filter 0.12s ease, opacity 0.2s ease;
+    position:relative; overflow:hidden;
+  }
+  .block:active{ transform: scale(0.96); filter:brightness(0.92); }
+  .block.A{ background: var(--a); }
+  .block.B{ background: var(--b); }
+  .block.C{ background: var(--c); }
+  .block.D{ background: var(--d); }
+  .block .letter{
+    font-size: clamp(34px, 9vw, 56px); font-weight:900; color: rgba(0,0,0,0.78);
+    line-height:1;
+  }
+  .block .opt-text{
+    font-size: clamp(14px, 3.6vw, 18px); font-weight:700; color: rgba(0,0,0,0.78);
+    padding: 0 18px; text-align:center; line-height:1.3;
+  }
+  .block.disabled{ opacity:0.35; pointer-events:none; }
+  .block.chosen{ outline: 5px solid rgba(244,241,234,0.85); outline-offset:-5px; }
+
+  .guest-status{
+    padding: 18px 24px 28px; text-align:center; color:var(--muted); font-size:14px; flex-shrink:0;
+  }
+
+  /* ===== 投影 / display ===== */
+  .disp-wrap{ min-height:100vh; display:flex; flex-direction:column; padding: 40px 56px; }
+  .disp-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom: 28px; }
+  .disp-qnum{ font-size:18px; color:var(--muted); font-weight:700; letter-spacing:0.08em; }
+  .disp-counter{ font-size:16px; color:var(--muted); }
+  .disp-qtext{
+    font-size: clamp(28px, 4.2vw, 52px); font-weight:800; line-height:1.3; margin: 4px 0 36px;
+  }
+  .disp-options{
+    flex:1; display:grid; grid-template-columns:1fr 1fr; gap:22px;
+  }
+  .disp-opt{
+    border-radius:24px; padding: 28px 32px; display:flex; flex-direction:column; justify-content:space-between;
+    position:relative; overflow:hidden; min-height:140px;
+  }
+  .disp-opt.A{ background: var(--a); }
+  .disp-opt.B{ background: var(--b); }
+  .disp-opt.C{ background: var(--c); }
+  .disp-opt.D{ background: var(--d); }
+  .disp-opt-top{ display:flex; align-items:center; gap:16px; }
+  .disp-opt-letter{ font-size:40px; font-weight:900; color:rgba(0,0,0,0.78); }
+  .disp-opt-text{ font-size: clamp(18px,2.6vw,28px); font-weight:700; color:rgba(0,0,0,0.78); line-height:1.3; }
+  .disp-opt-bar-track{
+    height:14px; border-radius:8px; background:rgba(0,0,0,0.18); overflow:hidden; margin-top:18px;
+  }
+  .disp-opt-bar-fill{
+    height:100%; background:rgba(0,0,0,0.62); border-radius:8px;
+    transition: width 0.6s cubic-bezier(.2,.8,.2,1); width:0%;
+  }
+  .disp-opt-pct{ font-size:22px; font-weight:800; color:rgba(0,0,0,0.82); margin-top:10px; }
+  .disp-idle{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
+  .disp-link-pill{
+    background:var(--panel); border:1px solid var(--line); border-radius:999px;
+    padding:14px 28px; font-size:18px; color:var(--ink); margin-top:8px;
+  }
+
+  /* ===== 主持人控制 control ===== */
+  .ctrl-wrap{ min-height:100vh; padding: 18px 16px 120px; max-width:560px; margin:0 auto; }
+  .ctrl-header{ padding: 10px 4px 18px; }
+  .ctrl-tag{ font-size:12px; color:var(--muted); letter-spacing:0.12em; text-transform:uppercase; font-weight:700; }
+  .ctrl-card{
+    background:var(--panel); border:1px solid var(--line); border-radius:18px;
+    padding:18px; margin-bottom:14px;
+  }
+  .ctrl-qnum{ font-size:13px; color:var(--muted); font-weight:700; margin-bottom:6px; }
+  .ctrl-qtext{ font-size:18px; font-weight:800; line-height:1.4; margin-bottom:14px; }
+  .ctrl-opt-row{ display:flex; align-items:center; gap:10px; padding:8px 0; border-top:1px solid var(--line); }
+  .ctrl-opt-row:first-of-type{ border-top:none; }
+  .ctrl-swatch{ width:26px; height:26px; border-radius:8px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-weight:900; font-size:13px; color:rgba(0,0,0,0.78); }
+  .ctrl-opt-row .txt{ flex:1; font-size:14px; }
+  .ctrl-opt-row .cnt{ font-size:14px; color:var(--muted); font-weight:700; min-width:30px; text-align:right; }
+  .ctrl-opt-row .bar{ height:8px; flex:1; max-width:90px; background:rgba(255,255,255,0.08); border-radius:6px; overflow:hidden; }
+  .ctrl-opt-row .bar-fill{ height:100%; border-radius:6px; transition: width .4s ease; }
+
+  .btn-row{ display:flex; gap:10px; margin-top:6px; }
+  .btn{
+    flex:1; border:none; border-radius:14px; padding:16px 14px; font-size:15px; font-weight:800;
+    cursor:pointer; transition: filter .12s ease, transform .1s ease;
+  }
+  .btn:active{ transform: scale(0.97); }
+  .btn-primary{ background:var(--c); color:#0c1410; }
+  .btn-secondary{ background:rgba(255,255,255,0.08); color:var(--ink); border:1px solid var(--line); }
+  .btn-ghost{ background:transparent; color:var(--muted); border:1px solid var(--line); }
+  .btn:disabled{ opacity:0.35; pointer-events:none; }
+
+  .ctrl-progress{ font-size:13px; color:var(--muted); margin: 4px 2px 14px; }
+
+  textarea.qa-input{
+    width:100%; min-height:220px; border-radius:12px; border:1px solid var(--line);
+    background:#0f0d15; color:var(--ink); font-size:13px; padding:12px; line-height:1.6;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; resize:vertical;
+  }
+  .hint{ font-size:12px; color:var(--muted); line-height:1.6; margin-top:10px; }
+  .toast{
+    position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+    background:var(--ink); color:#14121a; padding:10px 18px; border-radius:999px;
+    font-size:13px; font-weight:700; opacity:0; transition:opacity .25s ease; pointer-events:none;
+    z-index: 50;
+  }
+  .toast.show{ opacity:1; }
+  .nav-tabs{ display:flex; gap:8px; margin-bottom:16px; }
+  .nav-tab{
+    flex:1; text-align:center; padding:10px; border-radius:12px; font-size:13px; font-weight:700;
+    background:rgba(255,255,255,0.06); color:var(--muted); cursor:pointer; border:1px solid transparent;
+  }
+  .nav-tab.active{ background:var(--panel); color:var(--ink); border-color:var(--line); }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const LETTERS = ["A","B","C","D"];
+const COLORS = { A:"var(--a)", B:"var(--b)", C:"var(--c)", D:"var(--d)" };
+
+const DEFAULT_QUESTIONS = [
+  { text: "今天活動最讓你期待的環節是？", options: ["開場表演","主題分享","互動遊戲","抽獎時間"] },
+  { text: "你平常最常使用哪一種交通方式通勤？", options: ["開車","捷運/公車","機車","步行/騎車"] },
+  { text: "猜猜看，今天現場大概有多少人？", options: ["50 人以下","50-100 人","100-200 人","200 人以上"] },
+];
+
+function uid(){
+  return "g" + Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
+}
+
+function getParam(name){
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+async function storageGet(key, shared){
+  try{
+    const res = await window.storage.get(key, shared);
+    return res ? res.value : null;
+  }catch(e){
+    return null;
+  }
+}
+async function storageSet(key, value, shared){
+  try{
+    await window.storage.set(key, value, shared);
+    return true;
+  }catch(e){
+    return false;
+  }
+}
+async function storageList(prefix, shared){
+  try{
+    const res = await window.storage.list(prefix, shared);
+    return res ? res.keys : [];
+  }catch(e){
+    return [];
+  }
+}
+
+const STATE_KEY = "vote_state_v1"; // {qIndex, phase: 'idle'|'voting'|'results'}
+const QUESTIONS_KEY = "vote_questions_v1";
+
+async function loadState(){
+  const raw = await storageGet(STATE_KEY, true);
+  if(!raw) return { qIndex: -1, phase: "idle" };
+  try{ return JSON.parse(raw); }catch(e){ return { qIndex:-1, phase:"idle" }; }
+}
+async function saveState(state){
+  await storageSet(STATE_KEY, JSON.stringify(state), true);
+}
+async function loadQuestions(){
+  const raw = await storageGet(QUESTIONS_KEY, true);
+  if(!raw) return DEFAULT_QUESTIONS;
+  try{
+    const parsed = JSON.parse(raw);
+    if(Array.isArray(parsed) && parsed.length) return parsed;
+    return DEFAULT_QUESTIONS;
+  }catch(e){ return DEFAULT_QUESTIONS; }
+}
+async function saveQuestions(qs){
+  await storageSet(QUESTIONS_KEY, JSON.stringify(qs), true);
+}
+async function getVoteCounts(qIndex){
+  const keys = await storageList(`v:${qIndex}:`, true);
+  const counts = { A:0, B:0, C:0, D:0 };
+  keys.forEach(k => {
+    // key format: v:{qIndex}:{choice}:{guestId}
+    const parts = k.split(":");
+    const choice = parts[2];
+    if(counts.hasOwnProperty(choice)) counts[choice]++;
+  });
+  return counts;
+}
+
+function parseQuestionBank(text){
+  const blocks = text.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
+  const out = [];
+  blocks.forEach(block => {
+    const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
+    let qtext = "";
+    const opts = { A:"", B:"", C:"", D:"" };
+    lines.forEach(line => {
+      const m = line.match(/^([QABCD]):\s*(.*)$/i);
+      if(!m) return;
+      const tag = m[1].toUpperCase();
+      const val = m[2].trim();
+      if(tag === "Q") qtext = val;
+      else opts[tag] = val;
+    });
+    if(qtext && opts.A && opts.B && opts.C && opts.D){
+      out.push({ text: qtext, options: [opts.A, opts.B, opts.C, opts.D] });
+    }
+  });
+  return out;
+}
+function questionsToText(qs){
+  return qs.map(q => `Q: ${q.text}\nA: ${q.options[0]}\nB: ${q.options[1]}\nC: ${q.options[2]}\nD: ${q.options[3]}`).join("\n\n");
+}
+
+/* ================= 來賓畫面 ================= */
+function GuestView(){
+  const [state, setState] = useState({ qIndex:-1, phase:"idle" });
+  const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
+  const [guestId] = useState(uid());
+  const [votedFor, setVotedFor] = useState({}); // {qIndex: choice}
+  const [submitting, setSubmitting] = useState(false);
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    async function tick(){
+      const [s, qs] = await Promise.all([loadState(), loadQuestions()]);
+      if(!alive) return;
+      setState(s);
+      setQuestions(qs);
+    }
+    tick();
+    pollRef.current = setInterval(tick, 1500);
+    return () => { alive = false; clearInterval(pollRef.current); };
+  }, []);
+
+  const handleVote = async (choice) => {
+    if(state.phase !== "voting") return;
+    if(votedFor[state.qIndex]) return;
+    setSubmitting(true);
+    setVotedFor(prev => ({ ...prev, [state.qIndex]: choice }));
+    await storageSet(`v:${state.qIndex}:${choice}:${guestId}`, "1", true);
+    setSubmitting(false);
+  };
+
+  if(state.phase === "idle" || state.qIndex < 0){
+    return (
+      <div className="center-screen">
+        <div className="eyebrow">現場互動投票</div>
+        <div className="big-title">準備好了嗎？</div>
+        <div className="sub">主持人即將開始第一題，請留在這個畫面。</div>
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  const q = questions[state.qIndex] || { text:"", options:["","","",""] };
+  const myChoice = votedFor[state.qIndex];
+
+  if(state.phase === "results"){
+    return (
+      <div className="center-screen">
+        <div className="eyebrow">第 {state.qIndex+1} 題 · 結果統計中</div>
+        <div className="big-title">{myChoice ? "已收到你的答案" : "本題作答已截止"}</div>
+        <div className="sub">{myChoice ? `你選的是 ${myChoice}，` : ""}請抬頭看大螢幕上的結果！</div>
+        <div className="spinner"></div>
+      </div>
+    );
+  }
+
+  // phase === 'voting'
+  return (
+    <div className="guest-wrap">
+      <div className="guest-topbar">
+        <div className="guest-qnum">第 {state.qIndex+1} 題</div>
+        <div className="guest-qtext">{q.text}</div>
+      </div>
+      <div className="grid4">
+        {LETTERS.map((L, i) => {
+          const disabled = !!myChoice && myChoice !== L;
+          const chosen = myChoice === L;
+          return (
+            <button
+              key={L}
+              className={`block ${L} ${myChoice ? (chosen ? "chosen" : "disabled") : ""}`}
+              onClick={() => handleVote(L)}
+              disabled={!!myChoice}
+            >
+              <div className="letter">{L}</div>
+              <div className="opt-text">{q.options[i]}</div>
+            </button>
+          );
+        })}
+      </div>
+      <div className="guest-status">
+        {myChoice ? "已送出，等待其他人作答…" : (submitting ? "送出中…" : "點選你的答案")}
+      </div>
+    </div>
+  );
+}
+
+/* ================= 投影畫面 ================= */
+function DisplayView(){
+  const [state, setState] = useState({ qIndex:-1, phase:"idle" });
+  const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
+  const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    let alive = true;
+    async function tick(){
+      const [s, qs] = await Promise.all([loadState(), loadQuestions()]);
+      if(!alive) return;
+      setState(s);
+      setQuestions(qs);
+      if(s.qIndex >= 0){
+        const c = await getVoteCounts(s.qIndex);
+        if(alive) setCounts(c);
+      }
+    }
+    tick();
+    pollRef.current = setInterval(tick, 1500);
+    return () => { alive = false; clearInterval(pollRef.current); };
+  }, []);
+
+  const total = counts.A + counts.B + counts.C + counts.D;
+  const pct = (n) => total === 0 ? 0 : Math.round((n/total)*100);
+
+  if(state.phase === "idle" || state.qIndex < 0){
+    return (
+      <div className="disp-wrap">
+        <div className="disp-idle">
+          <div className="eyebrow">現場互動投票</div>
+          <div className="big-title" style={{fontSize:"clamp(28px,5vw,48px)"}}>請用手機開啟連結加入</div>
+          <div className="sub" style={{fontSize:18}}>等待主持人開始第一題…</div>
+        </div>
+      </div>
+    );
+  }
+
+  const q = questions[state.qIndex] || { text:"", options:["","","",""] };
+
+  return (
+    <div className="disp-wrap">
+      <div className="disp-head">
+        <div className="disp-qnum">第 {state.qIndex+1} / {questions.length} 題</div>
+        <div className="disp-counter">
+          <span className="pulse-dot"></span>
+          {state.phase === "voting" ? `${total} 人已作答` : `共 ${total} 人作答`}
+        </div>
+      </div>
+      <div className="disp-qtext">{q.text}</div>
+      <div className="disp-options">
+        {LETTERS.map((L, i) => {
+          const n = counts[L];
+          return (
+            <div key={L} className={`disp-opt ${L}`}>
+              <div>
+                <div className="disp-opt-top">
+                  <div className="disp-opt-letter">{L}</div>
+                  <div className="disp-opt-text">{q.options[i]}</div>
+                </div>
+              </div>
+              {state.phase === "results" ? (
+                <div>
+                  <div className="disp-opt-bar-track">
+                    <div className="disp-opt-bar-fill" style={{ width: pct(n) + "%" }}></div>
+                  </div>
+                  <div className="disp-opt-pct">{pct(n)}%　({n})</div>
+                </div>
+              ) : <div style={{height:14}}></div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ================= 主持人控制畫面 ================= */
+function ControlView(){
+  const [state, setState] = useState({ qIndex:-1, phase:"idle" });
+  const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
+  const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
+  const [tab, setTab] = useState("run"); // run | edit
+  const [qaText, setQaText] = useState(questionsToText(DEFAULT_QUESTIONS));
+  const [toast, setToast] = useState("");
+  const pollRef = useRef(null);
+  const toastTimer = useRef(null);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 1800);
+  };
+
+  useEffect(() => {
+    let alive = true;
+    async function tick(){
+      const [s, qs] = await Promise.all([loadState(), loadQuestions()]);
+      if(!alive) return;
+      setState(s);
+      setQuestions(qs);
+      if(s.qIndex >= 0){
+        const c = await getVoteCounts(s.qIndex);
+        if(alive) setCounts(c);
+      }
+    }
+    tick();
+    pollRef.current = setInterval(tick, 1500);
+    return () => { alive = false; clearInterval(pollRef.current); };
+  }, []);
+
+  const total = counts.A + counts.B + counts.C + counts.D;
+  const pct = (n) => total === 0 ? 0 : Math.round((n/total)*100);
+
+  const startQuestion = async (idx) => {
+    if(idx < 0 || idx >= questions.length) return;
+    await saveState({ qIndex: idx, phase: "voting" });
+    setState({ qIndex: idx, phase: "voting" });
+    setCounts({A:0,B:0,C:0,D:0});
+    showToast(`已開始第 ${idx+1} 題`);
+  };
+  const showResults = async () => {
+    await saveState({ qIndex: state.qIndex, phase: "results" });
+    setState(prev => ({ ...prev, phase: "results" }));
+    showToast("已顯示結果");
+  };
+  const nextQuestion = async () => {
+    const next = state.qIndex + 1;
+    if(next >= questions.length){ showToast("已經是最後一題"); return; }
+    await startQuestion(next);
+  };
+  const resetAll = async () => {
+    await saveState({ qIndex: -1, phase: "idle" });
+    setState({ qIndex:-1, phase:"idle" });
+    showToast("已重置，回到等待畫面");
+  };
+  const saveBank = async () => {
+    const parsed = parseQuestionBank(qaText);
+    if(parsed.length === 0){
+      showToast("格式有誤，請檢查題庫內容");
+      return;
+    }
+    await saveQuestions(parsed);
+    setQuestions(parsed);
+    showToast(`已儲存 ${parsed.length} 題`);
+    setTab("run");
+  };
+
+  const q = state.qIndex >= 0 ? questions[state.qIndex] : null;
+
+  return (
+    <div className="ctrl-wrap">
+      <div className="ctrl-header">
+        <div className="ctrl-tag">主持人控制台</div>
+        <div className="big-title" style={{fontSize:22, textAlign:"left"}}>現場互動投票</div>
+      </div>
+
+      <div className="nav-tabs">
+        <div className={`nav-tab ${tab==="run"?"active":""}`} onClick={() => setTab("run")}>進行活動</div>
+        <div className={`nav-tab ${tab==="edit"?"active":""}`} onClick={() => setTab("edit")}>編輯題庫</div>
+      </div>
+
+      {tab === "run" && (
+        <React.Fragment>
+          <div className="ctrl-progress">
+            狀態：{state.phase==="idle"?"尚未開始":state.phase==="voting"?"作答中":"顯示結果中"}
+            {state.qIndex>=0 && `　·　第 ${state.qIndex+1} / ${questions.length} 題`}
+          </div>
+
+          {!q && (
+            <div className="ctrl-card">
+              <div className="ctrl-qtext">尚未開始任何題目</div>
+              <div className="hint">目前題庫共 {questions.length} 題。準備好後按下方按鈕開始第一題。</div>
+              <div className="btn-row" style={{marginTop:14}}>
+                <button className="btn btn-primary" onClick={() => startQuestion(0)}>開始第一題</button>
+              </div>
+            </div>
+          )}
+
+          {q && (
+            <div className="ctrl-card">
+              <div className="ctrl-qnum">第 {state.qIndex+1} 題</div>
+              <div className="ctrl-qtext">{q.text}</div>
+              {LETTERS.map((L,i) => (
+                <div className="ctrl-opt-row" key={L}>
+                  <div className="ctrl-swatch" style={{background:COLORS[L]}}>{L}</div>
+                  <div className="txt">{q.options[i]}</div>
+                  {state.phase === "results" && (
+                    <React.Fragment>
+                      <div className="bar"><div className="bar-fill" style={{width:pct(counts[L])+"%", background:COLORS[L]}}></div></div>
+                      <div className="cnt">{pct(counts[L])}%</div>
+                    </React.Fragment>
+                  )}
+                  {state.phase === "voting" && <div className="cnt">{counts[L]}</div>}
+                </div>
+              ))}
+              <div className="hint">{state.phase==="voting" ? `目前共 ${total} 人已作答` : `共 ${total} 人作答`}</div>
+
+              <div className="btn-row" style={{marginTop:14}}>
+                {state.phase === "voting" && (
+                  <button className="btn btn-primary" onClick={showResults}>顯示結果</button>
+                )}
+                {state.phase === "results" && (
+                  <button className="btn btn-primary" onClick={nextQuestion} disabled={state.qIndex+1>=questions.length}>
+                    下一題
+                  </button>
+                )}
+                {state.phase === "voting" && (
+                  <button className="btn btn-secondary" onClick={nextQuestion} disabled={state.qIndex+1>=questions.length}>
+                    跳過此題
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          <button className="btn btn-ghost" style={{width:"100%"}} onClick={resetAll}>重置活動（回到等待畫面）</button>
+        </React.Fragment>
+      )}
+
+      {tab === "edit" && (
+        <div className="ctrl-card">
+          <div className="ctrl-qtext" style={{marginBottom:8}}>編輯題庫</div>
+          <div className="hint" style={{marginTop:0, marginBottom:10}}>
+            每題一段，用空白行分隔。格式如下，A/B/C/D 四個選項都必填：
+          </div>
+          <textarea
+            className="qa-input"
+            value={qaText}
+            onChange={e => setQaText(e.target.value)}
+            spellCheck={false}
+          />
+          <div className="hint">
+            目前題庫共 {questions.length} 題。儲存後，活動進行中與投影畫面會自動套用新題庫（建議在活動開始前先設定好）。
+          </div>
+          <div className="btn-row" style={{marginTop:14}}>
+            <button className="btn btn-primary" onClick={saveBank}>儲存題庫</button>
+            <button className="btn btn-secondary" onClick={() => setQaText(questionsToText(questions))}>還原目前題庫內容</button>
+          </div>
+        </div>
+      )}
+
+      <div className={`toast ${toast?"show":""}`}>{toast}</div>
+    </div>
+  );
+}
+
+function App(){
+  const view = getParam("view");
+  if(view === "display") return <DisplayView />;
+  if(view === "control") return <ControlView />;
+  return <GuestView />;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>現場互動投票</title>
+<title>現場互動投票 - Firebase 實戰連線版</title>
 <style>
   :root{
     --bg: #14121a;
@@ -191,8 +191,53 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 
+<script type="importmap">
+  {
+    "imports": {
+      "firebase/app": "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js",
+      "firebase/database": "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js"
+    }
+  }
+</script>
+
+<script type="module">
+  // 初始化 Firebase 並導出到 window 全域，讓下方的 React 腳本可以使用
+  import { initializeApp } from "firebase/app";
+  import { getDatabase, ref, set, get, onValue } from "firebase/database";
+
+  // ⚠️ 請在這裡貼上你在 Firebase 後台拿到的應用程式金鑰
+  const firebaseConfig = {
+    apiKey: "AIzaSyC-V1EYB9AWU2-vGpou2ucufDPgRV5Q9mQ",
+    authDomain: "ssr-vote.firebaseapp.com",
+    projectId: "ssr-vote",
+    storageBucket: "ssr-vote.firebasestorage.app",
+    messagingSenderId: "580523113201",
+    appId: "1:580523113201:web:0b118e943681686f4b4750",
+    measurementId: "G-L25EKCM1L3"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // 把 Firebase 的操作打包成原本 React 組件看得懂的 Promise 函數
+  window.fbStorage = {
+    get: async (path) => {
+      const snapshot = await get(ref(db, path));
+      return snapshot.exists() ? snapshot.val() : null;
+    },
+    set: async (path, value) => {
+      await set(ref(db, path), value);
+    },
+    listen: (path, callback) => {
+      return onValue(ref(db, path), (snapshot) => {
+        callback(snapshot.val());
+      });
+    }
+  };
+</script>
+
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef, useCallback } = React;
+const { useState, useEffect, useRef } = React;
 
 const LETTERS = ["A","B","C","D"];
 const COLORS = { A:"var(--a)", B:"var(--b)", C:"var(--c)", D:"var(--d)" };
@@ -209,66 +254,6 @@ function uid(){
 
 function getParam(name){
   return new URLSearchParams(window.location.search).get(name);
-}
-
-async function storageGet(key, shared){
-  try{
-    const res = await window.storage.get(key, shared);
-    return res ? res.value : null;
-  }catch(e){
-    return null;
-  }
-}
-async function storageSet(key, value, shared){
-  try{
-    await window.storage.set(key, value, shared);
-    return true;
-  }catch(e){
-    return false;
-  }
-}
-async function storageList(prefix, shared){
-  try{
-    const res = await window.storage.list(prefix, shared);
-    return res ? res.keys : [];
-  }catch(e){
-    return [];
-  }
-}
-
-const STATE_KEY = "vote_state_v1"; // {qIndex, phase: 'idle'|'voting'|'results'}
-const QUESTIONS_KEY = "vote_questions_v1";
-
-async function loadState(){
-  const raw = await storageGet(STATE_KEY, true);
-  if(!raw) return { qIndex: -1, phase: "idle" };
-  try{ return JSON.parse(raw); }catch(e){ return { qIndex:-1, phase:"idle" }; }
-}
-async function saveState(state){
-  await storageSet(STATE_KEY, JSON.stringify(state), true);
-}
-async function loadQuestions(){
-  const raw = await storageGet(QUESTIONS_KEY, true);
-  if(!raw) return DEFAULT_QUESTIONS;
-  try{
-    const parsed = JSON.parse(raw);
-    if(Array.isArray(parsed) && parsed.length) return parsed;
-    return DEFAULT_QUESTIONS;
-  }catch(e){ return DEFAULT_QUESTIONS; }
-}
-async function saveQuestions(qs){
-  await storageSet(QUESTIONS_KEY, JSON.stringify(qs), true);
-}
-async function getVoteCounts(qIndex){
-  const keys = await storageList(`v:${qIndex}:`, true);
-  const counts = { A:0, B:0, C:0, D:0 };
-  keys.forEach(k => {
-    // key format: v:{qIndex}:{choice}:{guestId}
-    const parts = k.split(":");
-    const choice = parts[2];
-    if(counts.hasOwnProperty(choice)) counts[choice]++;
-  });
-  return counts;
 }
 
 function parseQuestionBank(text){
@@ -301,21 +286,28 @@ function GuestView(){
   const [state, setState] = useState({ qIndex:-1, phase:"idle" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
   const [guestId] = useState(uid());
-  const [votedFor, setVotedFor] = useState({}); // {qIndex: choice}
+  const [votedFor, setVotedFor] = useState({}); 
   const [submitting, setSubmitting] = useState(false);
-  const pollRef = useRef(null);
 
   useEffect(() => {
-    let alive = true;
-    async function tick(){
-      const [s, qs] = await Promise.all([loadState(), loadQuestions()]);
-      if(!alive) return;
-      setState(s);
-      setQuestions(qs);
-    }
-    tick();
-    pollRef.current = setInterval(tick, 1500);
-    return () => { alive = false; clearInterval(pollRef.current); };
+    // 等待全域 Firebase 初始化完成後掛載監聽
+    const checkTimer = setInterval(() => {
+      if (window.fbStorage) {
+        clearInterval(checkTimer);
+        
+        // 監聽活動狀態 (即時同步切換題目)
+        window.fbStorage.listen("state", (val) => {
+          if (val) setState(val);
+        });
+
+        // 監聽題庫更新
+        window.fbStorage.listen("questions", (val) => {
+          if (val) setQuestions(val);
+        });
+      }
+    }, 100);
+
+    return () => clearInterval(checkTimer);
   }, []);
 
   const handleVote = async (choice) => {
@@ -323,7 +315,9 @@ function GuestView(){
     if(votedFor[state.qIndex]) return;
     setSubmitting(true);
     setVotedFor(prev => ({ ...prev, [state.qIndex]: choice }));
-    await storageSet(`v:${state.qIndex}:${choice}:${guestId}`, "1", true);
+    
+    // 直接推送到雲端資料庫的該題票數分類中
+    await window.fbStorage.set(`votes/${state.qIndex}/${guestId}`, choice);
     setSubmitting(false);
   };
 
@@ -332,7 +326,7 @@ function GuestView(){
       <div className="center-screen">
         <div className="eyebrow">現場互動投票</div>
         <div className="big-title">準備好了嗎？</div>
-        <div className="sub">主持人即將開始第一題，請留在這個畫面。</div>
+        <div className="sub">主持人即將開始第一題，請看大螢幕。</div>
         <div className="spinner"></div>
       </div>
     );
@@ -346,17 +340,17 @@ function GuestView(){
       <div className="center-screen">
         <div className="eyebrow">第 {state.qIndex+1} 題 · 結果統計中</div>
         <div className="big-title">{myChoice ? "已收到你的答案" : "本題作答已截止"}</div>
-        <div className="sub">{myChoice ? `你選的是 ${myChoice}，` : ""}請抬頭看大螢幕上的結果！</div>
+        <div className="sub">請抬頭看大螢幕上的結果統計！</div>
         <div className="spinner"></div>
       </div>
     );
   }
 
-  // phase === 'voting'
   return (
     <div className="guest-wrap">
       <div className="guest-topbar">
         <div className="guest-qnum">第 {state.qIndex+1} 題</div>
+        {/* UX 建議：若要觀眾專注於舞台，可將此處 q.text 隱藏，僅在投影端呈現 */}
         <div className="guest-qtext">{q.text}</div>
       </div>
       <div className="grid4">
@@ -377,7 +371,7 @@ function GuestView(){
         })}
       </div>
       <div className="guest-status">
-        {myChoice ? "已送出，等待其他人作答…" : (submitting ? "送出中…" : "點選你的答案")}
+        {myChoice ? "已送出，等待開票…" : (submitting ? "傳送中…" : "戳一個按鈕作答")}
       </div>
     </div>
   );
@@ -388,24 +382,42 @@ function DisplayView(){
   const [state, setState] = useState({ qIndex:-1, phase:"idle" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
   const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
-  const pollRef = useRef(null);
 
   useEffect(() => {
-    let alive = true;
-    async function tick(){
-      const [s, qs] = await Promise.all([loadState(), loadQuestions()]);
-      if(!alive) return;
-      setState(s);
-      setQuestions(qs);
-      if(s.qIndex >= 0){
-        const c = await getVoteCounts(s.qIndex);
-        if(alive) setCounts(c);
+    const checkTimer = setInterval(() => {
+      if (window.fbStorage) {
+        clearInterval(checkTimer);
+        
+        window.fbStorage.listen("state", (s) => {
+          if (s) setState(s);
+        });
+
+        window.fbStorage.listen("questions", (qs) => {
+          if (qs) setQuestions(qs);
+        });
+
+        // 核心：即時監聽當前題目的投票狀況並統計
+        window.fbStorage.listen("votes", (allVotes) => {
+          if (!allVotes) {
+            setCounts({ A:0, B:0, C:0, D:0 });
+            return;
+          }
+          // 抓取當前題目的所有答案
+          const currentQuestionVotes = allVotes[window.currentQIndexRef] || {};
+          const c = { A:0, B:0, C:0, D:0 };
+          Object.values(currentQuestionVotes).forEach(choice => {
+            if (c.hasOwnProperty(choice)) c[choice]++;
+          });
+          setCounts(c);
+        });
       }
-    }
-    tick();
-    pollRef.current = setInterval(tick, 1500);
-    return () => { alive = false; clearInterval(pollRef.current); };
+    }, 100);
+
+    return () => clearInterval(checkTimer);
   }, []);
+
+  // 運用一個全域的黑客手段讓 Firebase 異步回傳時能拿到最新的題號
+  window.currentQIndexRef = state.qIndex;
 
   const total = counts.A + counts.B + counts.C + counts.D;
   const pct = (n) => total === 0 ? 0 : Math.round((n/total)*100);
@@ -415,8 +427,8 @@ function DisplayView(){
       <div className="disp-wrap">
         <div className="disp-idle">
           <div className="eyebrow">現場互動投票</div>
-          <div className="big-title" style={{fontSize:"clamp(28px,5vw,48px)"}}>請用手機開啟連結加入</div>
-          <div className="sub" style={{fontSize:18}}>等待主持人開始第一題…</div>
+          <div className="big-title" style={{fontSize:"clamp(28px,5vw,48px)"}}>請翻閱節目單掃碼加入</div>
+          <div className="sub" style={{fontSize:18}}>等待開演，主持人即將發動第一題…</div>
         </div>
       </div>
     );
@@ -430,7 +442,7 @@ function DisplayView(){
         <div className="disp-qnum">第 {state.qIndex+1} / {questions.length} 題</div>
         <div className="disp-counter">
           <span className="pulse-dot"></span>
-          {state.phase === "voting" ? `${total} 人已作答` : `共 ${total} 人作答`}
+          {state.phase === "voting" ? `${total} 人已作答` : `共 ${total} 人提交`}
         </div>
       </div>
       <div className="disp-qtext">{q.text}</div>
@@ -450,7 +462,7 @@ function DisplayView(){
                   <div className="disp-opt-bar-track">
                     <div className="disp-opt-bar-fill" style={{ width: pct(n) + "%" }}></div>
                   </div>
-                  <div className="disp-opt-pct">{pct(n)}%　({n})</div>
+                  <div className="disp-opt-pct">{pct(n)}% ({n} 票)</div>
                 </div>
               ) : <div style={{height:14}}></div>}
             </div>
@@ -466,10 +478,9 @@ function ControlView(){
   const [state, setState] = useState({ qIndex:-1, phase:"idle" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
   const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
-  const [tab, setTab] = useState("run"); // run | edit
+  const [tab, setTab] = useState("run"); 
   const [qaText, setQaText] = useState(questionsToText(DEFAULT_QUESTIONS));
   const [toast, setToast] = useState("");
-  const pollRef = useRef(null);
   const toastTimer = useRef(null);
 
   const showToast = (msg) => {
@@ -479,56 +490,78 @@ function ControlView(){
   };
 
   useEffect(() => {
-    let alive = true;
-    async function tick(){
-      const [s, qs] = await Promise.all([loadState(), loadQuestions()]);
-      if(!alive) return;
-      setState(s);
-      setQuestions(qs);
-      if(s.qIndex >= 0){
-        const c = await getVoteCounts(s.qIndex);
-        if(alive) setCounts(c);
+    const checkTimer = setInterval(() => {
+      if (window.fbStorage) {
+        clearInterval(checkTimer);
+        
+        window.fbStorage.listen("state", (s) => {
+          if (s) setState(s);
+        });
+
+        window.fbStorage.listen("questions", (qs) => {
+          if (qs) {
+            setQuestions(qs);
+            setQaText(questionsToText(qs));
+          }
+        });
+
+        window.fbStorage.listen("votes", (allVotes) => {
+          if (!allVotes) {
+            setCounts({ A:0, B:0, C:0, D:0 });
+            return;
+          }
+          const currentQuestionVotes = allVotes[window.currentQIndexRef] || {};
+          const c = { A:0, B:0, C:0, D:0 };
+          Object.values(currentQuestionVotes).forEach(choice => {
+            if (c.hasOwnProperty(choice)) c[choice]++;
+          });
+          setCounts(c);
+        });
       }
-    }
-    tick();
-    pollRef.current = setInterval(tick, 1500);
-    return () => { alive = false; clearInterval(pollRef.current); };
+    }, 100);
+
+    return () => clearInterval(checkTimer);
   }, []);
+
+  window.currentQIndexRef = state.qIndex;
 
   const total = counts.A + counts.B + counts.C + counts.D;
   const pct = (n) => total === 0 ? 0 : Math.round((n/total)*100);
 
   const startQuestion = async (idx) => {
     if(idx < 0 || idx >= questions.length) return;
-    await saveState({ qIndex: idx, phase: "voting" });
-    setState({ qIndex: idx, phase: "voting" });
-    setCounts({A:0,B:0,C:0,D:0});
-    showToast(`已開始第 ${idx+1} 題`);
+    const newState = { qIndex: idx, phase: "voting" };
+    await window.fbStorage.set("state", newState);
+    showToast(`第 ${idx+1} 題已強勢開跑`);
   };
+  
   const showResults = async () => {
-    await saveState({ qIndex: state.qIndex, phase: "results" });
-    setState(prev => ({ ...prev, phase: "results" }));
-    showToast("已顯示結果");
+    const newState = { qIndex: state.qIndex, phase: "results" };
+    await window.fbStorage.set("state", newState);
+    showToast("大螢幕已揭曉統計數據");
   };
+  
   const nextQuestion = async () => {
     const next = state.qIndex + 1;
-    if(next >= questions.length){ showToast("已經是最後一題"); return; }
+    if(next >= questions.length){ showToast("已經是最後一題囉"); return; }
     await startQuestion(next);
   };
+  
   const resetAll = async () => {
-    await saveState({ qIndex: -1, phase: "idle" });
-    setState({ qIndex:-1, phase:"idle" });
-    showToast("已重置，回到等待畫面");
+    await window.fbStorage.set("state", { qIndex: -1, phase: "idle" });
+    await window.fbStorage.set("votes", null); // 清空投票數據
+    showToast("活動已全面重置歸零");
   };
+  
   const saveBank = async () => {
     const parsed = parseQuestionBank(qaText);
     if(parsed.length === 0){
-      showToast("格式有誤，請檢查題庫內容");
+      showToast("格式偵測有誤，請再檢查一下");
       return;
     }
-    await saveQuestions(parsed);
-    setQuestions(parsed);
-    showToast(`已儲存 ${parsed.length} 題`);
+    await window.fbStorage.set("questions", parsed);
+    await window.fbStorage.set("state", { qIndex: -1, phase: "idle" });
+    showToast(`成功匯入 ${parsed.length} 道新題目`);
     setTab("run");
   };
 
@@ -537,28 +570,28 @@ function ControlView(){
   return (
     <div className="ctrl-wrap">
       <div className="ctrl-header">
-        <div className="ctrl-tag">主持人控制台</div>
-        <div className="big-title" style={{fontSize:22, textAlign:"left"}}>現場互動投票</div>
+        <div className="ctrl-tag">舞台主控台面板</div>
+        <div className="big-title" style={{fontSize:22, textAlign:"left"}}>現場互動即時雲</div>
       </div>
 
       <div className="nav-tabs">
-        <div className={`nav-tab ${tab==="run"?"active":""}`} onClick={() => setTab("run")}>進行活動</div>
-        <div className={`nav-tab ${tab==="edit"?"active":""}`} onClick={() => setTab("edit")}>編輯題庫</div>
+        <div className={`nav-tab ${tab==="run"?"active":""}`} onClick={() => setTab("run")}>掌控節奏</div>
+        <div className={`nav-tab ${tab==="edit"?"active":""}`} onClick={() => setTab("edit")}>題庫配置</div>
       </div>
 
       {tab === "run" && (
         <React.Fragment>
           <div className="ctrl-progress">
-            狀態：{state.phase==="idle"?"尚未開始":state.phase==="voting"?"作答中":"顯示結果中"}
-            {state.qIndex>=0 && `　·　第 ${state.qIndex+1} / ${questions.length} 題`}
+            當前節奏：{state.phase==="idle"?"冷場等待中":state.phase==="voting"?"瘋狂作答中":"開票結果中"}
+            {state.qIndex>=0 && ` · 第 ${state.qIndex+1} / ${questions.length} 題`}
           </div>
 
           {!q && (
             <div className="ctrl-card">
-              <div className="ctrl-qtext">尚未開始任何題目</div>
-              <div className="hint">目前題庫共 {questions.length} 題。準備好後按下方按鈕開始第一題。</div>
+              <div className="ctrl-qtext">目前舞台尚未拋出問題</div>
+              <div className="hint">現有題庫共 {questions.length} 題。各就各位後點擊下方按鈕啟動。</div>
               <div className="btn-row" style={{marginTop:14}}>
-                <button className="btn btn-primary" onClick={() => startQuestion(0)}>開始第一題</button>
+                <button className="btn btn-primary" onClick={() => startQuestion(0)}>發動第一題</button>
               </div>
             </div>
           )}
@@ -577,38 +610,33 @@ function ControlView(){
                       <div className="cnt">{pct(counts[L])}%</div>
                     </React.Fragment>
                   )}
-                  {state.phase === "voting" && <div className="cnt">{counts[L]}</div>}
+                  {state.phase === "voting" && <div className="cnt">{counts[L]} 票</div>}
                 </div>
               ))}
-              <div className="hint">{state.phase==="voting" ? `目前共 ${total} 人已作答` : `共 ${total} 人作答`}</div>
+              <div className="hint">{state.phase==="voting" ? `台下已有 ${total} 人搶答` : `總計回收 ${total} 張選票`}</div>
 
               <div className="btn-row" style={{marginTop:14}}>
                 {state.phase === "voting" && (
-                  <button className="btn btn-primary" onClick={showResults}>顯示結果</button>
+                  <button className="btn btn-primary" onClick={showResults}>切換到結果開票</button>
                 )}
                 {state.phase === "results" && (
                   <button className="btn btn-primary" onClick={nextQuestion} disabled={state.qIndex+1>=questions.length}>
-                    下一題
-                  </button>
-                )}
-                {state.phase === "voting" && (
-                  <button className="btn btn-secondary" onClick={nextQuestion} disabled={state.qIndex+1>=questions.length}>
-                    跳過此題
+                    推進到下一題
                   </button>
                 )}
               </div>
             </div>
           )}
 
-          <button className="btn btn-ghost" style={{width:"100%"}} onClick={resetAll}>重置活動（回到等待畫面）</button>
+          <button className="btn btn-ghost" style={{width:"100%"}} onClick={resetAll}>清空全場數據（重回起點）</button>
         </React.Fragment>
       )}
 
       {tab === "edit" && (
         <div className="ctrl-card">
-          <div className="ctrl-qtext" style={{marginBottom:8}}>編輯題庫</div>
+          <div className="ctrl-qtext" style={{marginBottom:8}}>動態題庫調整</div>
           <div className="hint" style={{marginTop:0, marginBottom:10}}>
-            每題一段，用空白行分隔。格式如下，A/B/C/D 四個選項都必填：
+            格式：題目與選項佔一行，用空白行隔開題型。
           </div>
           <textarea
             className="qa-input"
@@ -616,12 +644,8 @@ function ControlView(){
             onChange={e => setQaText(e.target.value)}
             spellCheck={false}
           />
-          <div className="hint">
-            目前題庫共 {questions.length} 題。儲存後，活動進行中與投影畫面會自動套用新題庫（建議在活動開始前先設定好）。
-          </div>
           <div className="btn-row" style={{marginTop:14}}>
-            <button className="btn btn-primary" onClick={saveBank}>儲存題庫</button>
-            <button className="btn btn-secondary" onClick={() => setQaText(questionsToText(questions))}>還原目前題庫內容</button>
+            <button className="btn btn-primary" onClick={saveBank}>同步儲存到雲端</button>
           </div>
         </div>
       )}
@@ -640,6 +664,5 @@ function App(){
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
-
 </body>
 </html>

@@ -5,6 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>現場互動投票 - Firebase 實戰連線版</title>
 <style>
+
+  /* 揭曉正確答案的發光特效 */
+  .disp-opt.is-correct {
+    outline: 6px solid #ffffff; 
+    transform: scale(1.03);     
+    box-shadow: 0 0 40px rgba(255,255,255,0.6); 
+    z-index: 10;
+    transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  }
+  
   :root{
     --bg: #14121a;
     --panel: #1d1a26;
@@ -275,30 +285,25 @@ function questionsToText(qs){
 
 /* ================= 來賓畫面 ================= */
 function GuestView(){
-  const [state, setState] = useState({ qIndex:-1, phase:"idle" });
+  // 狀態新增 correctAnswer
+  const [state, setState] = useState({ qIndex:-1, phase:"idle", correctAnswer:"" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
-  const [guestId] = useState(uid());
+  const [guestId] = useState(uid()); // 每次重整都會取得全新 ID
   const [votedFor, setVotedFor] = useState({}); 
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    // 等待全域 Firebase 初始化完成後掛載監聽
     const checkTimer = setInterval(() => {
       if (window.fbStorage) {
         clearInterval(checkTimer);
-        
-        // 監聽活動狀態 (即時同步切換題目)
         window.fbStorage.listen("state", (val) => {
           if (val) setState(val);
         });
-
-        // 監聽題庫更新
         window.fbStorage.listen("questions", (val) => {
           if (val) setQuestions(val);
         });
       }
     }, 100);
-
     return () => clearInterval(checkTimer);
   }, []);
 
@@ -307,8 +312,6 @@ function GuestView(){
     if(votedFor[state.qIndex]) return;
     setSubmitting(true);
     setVotedFor(prev => ({ ...prev, [state.qIndex]: choice }));
-    
-    // 直接推送到雲端資料庫的該題票數分類中
     await window.fbStorage.set(`votes/${state.qIndex}/${guestId}`, choice);
     setSubmitting(false);
   };
@@ -327,13 +330,18 @@ function GuestView(){
   const q = questions[state.qIndex] || { text:"", options:["","","",""] };
   const myChoice = votedFor[state.qIndex];
 
-  if(state.phase === "results"){
+  // 攔截 results (統計中) 與 reveal_answer (揭曉答案)
+  if(state.phase === "results" || state.phase === "reveal_answer"){
+    const isRevealed = state.phase === "reveal_answer";
     return (
       <div className="center-screen">
-        <div className="eyebrow">第 {state.qIndex+1} 題 · 結果統計中</div>
-        <div className="big-title">{myChoice ? "已收到你的答案" : "本題作答已截止"}</div>
-        <div className="sub">請抬頭看大螢幕上的結果統計！</div>
-        <div className="spinner"></div>
+        <div className="eyebrow">第 {state.qIndex+1} 題 · {isRevealed ? "答案已揭曉" : "結果統計中"}</div>
+        <div className="big-title">
+          {isRevealed ? `正確解答是：${state.correctAnswer}` : (myChoice ? "已收到你的答案" : "本題作答已截止")}
+        </div>
+        <div className="sub">請抬頭看大螢幕上的最終結果！</div>
+        {/* 揭曉後就不顯示轉圈圈了 */}
+        {!isRevealed && <div className="spinner"></div>}
       </div>
     );
   }
@@ -342,7 +350,6 @@ function GuestView(){
     <div className="guest-wrap">
       <div className="guest-topbar">
         <div className="guest-qnum">第 {state.qIndex+1} 題</div>
-        {/* UX 建議：若要觀眾專注於舞台，可將此處 q.text 隱藏，僅在投影端呈現 */}
         <div className="guest-qtext">{q.text}</div>
       </div>
       <div className="grid4">
@@ -368,7 +375,6 @@ function GuestView(){
     </div>
   );
 }
-
 /* ================= 投影畫面 ================= */
 function DisplayView(){
   // 加上 correctAnswer 狀態，準備接收控制台傳來的正確答案

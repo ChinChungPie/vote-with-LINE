@@ -545,16 +545,27 @@ function ControlView(){
     showToast("活動已全面重置歸零");
   };
   
-  const saveBank = async () => {
+const saveBank = async () => {
     const parsed = parseQuestionBank(qaText);
-    if(parsed.length === 0){
-      showToast("格式偵測有誤，請再檢查一下");
+    
+    // 🔥 除錯檢查：如果解析出來是空的，直接跳出警示
+    if (!parsed || parsed.length === 0) {
+      showToast("解析失敗！請確認格式是否正確");
+      console.log("解析結果:", parsed); // 按 F12 在 Console 看細節
       return;
     }
-    await window.fbStorage.set("questions", parsed);
-    await window.fbStorage.set("state", { qIndex: -1, phase: "idle" });
-    showToast(`成功匯入 ${parsed.length} 道新題目`);
-    setTab("run");
+    
+    try {
+      console.log("嘗試寫入雲端:", parsed);
+      await window.fbStorage.set("questions", parsed);
+      await window.fbStorage.set("state", { qIndex: -1, phase: "idle" });
+      showToast(`成功匯入 ${parsed.length} 道新題目`);
+      setTab("run");
+    } catch (e) {
+      // 🔥 除錯檢查：如果 Firebase 寫入失敗，直接把錯誤顯示出來
+      showToast("雲端儲存失敗: " + e.message);
+      console.error("Firebase 錯誤:", e);
+    }
   };
 
   const q = state.qIndex >= 0 ? questions[state.qIndex] : null;

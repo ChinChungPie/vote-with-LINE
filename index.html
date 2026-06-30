@@ -201,14 +201,11 @@
 </script>
 
 <script type="module">
-  // 1. 初始化 Firebase 核心與分析
+  // 1. 只留 Firebase 核心與即時資料庫
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
-  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js";
-  
-  // 2. 🚨 補上最關鍵的「即時資料庫」模組！
   import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
 
-  // 3. 你的專屬金鑰 (已幫你補上 databaseURL 防呆)
+  // 2. 你的專屬金鑰 (把 measurementId 移除了)
   const firebaseConfig = {
     apiKey: "AIzaSyC-V1EYB9AWU2-vGpou2ucufDPgRV5Q9mQ",
     authDomain: "ssr-vote.firebaseapp.com",
@@ -216,16 +213,14 @@
     storageBucket: "ssr-vote.firebasestorage.app",
     messagingSenderId: "580523113201",
     appId: "1:580523113201:web:0b118e943681686f4b4750",
-    measurementId: "G-L25EKCM1L3",
-    databaseURL: "https://ssr-vote-default-rtdb.firebaseio.com" // <- 補上這行確保能連到資料庫
+    databaseURL: "https://ssr-vote-default-rtdb.firebaseio.com"
   };
 
-  // 4. 啟動 Firebase 服務
+  // 3. 啟動 Firebase 服務
   const app = initializeApp(firebaseConfig);
-  const analytics = getAnalytics(app);
-  const db = getDatabase(app); // 現在系統終於認識 getDatabase 是什麼了
+  const db = getDatabase(app); 
 
-  // 5. 把 Firebase 的操作打包成原本 React 組件看得懂的 Promise 函數
+  // 4. 打包給 React 使用
   window.fbStorage = {
     get: async (path) => {
       const snapshot = await get(ref(db, path));

@@ -3,9 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>現場互動投票 - Firebase 實戰連線版</title>
+<title>現場互動投票 - 完整動態選項版</title>
 <style>
-
   /* 揭曉正確答案的發光特效 */
   .disp-opt.is-correct {
     outline: 6px solid #ffffff; 
@@ -24,6 +23,8 @@
     --b: #f0a93f;   /* 琥珀黃 */
     --c: #3fb88f;   /* 青綠 */
     --d: #6f7bd4;   /* 紫藍 */
+    --e: #e67e22;   /* 活力橘 (新增) */
+    --f: #9b59b6;   /* 神秘紫 (新增) */
     --line: rgba(244,241,234,0.10);
   }
   *{ box-sizing: border-box; }
@@ -75,10 +76,14 @@
     font-size: clamp(17px, 4.6vw, 22px); font-weight:800; margin-top:6px; line-height:1.4;
     padding: 0 6px;
   }
-  .grid4{
-    flex:1; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr;
-    gap:10px; padding:10px; min-height: 60vh;
+  
+  /* 動態網格：來賓端 (4選項 2x2, 6選項 2x3) */
+  .grid-layout {
+    flex:1; display:grid; gap:10px; padding:10px; min-height: 60vh;
   }
+  .grid4 { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+  .grid6 { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr 1fr; }
+
   .block{
     border:none; border-radius:18px; cursor:pointer;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
@@ -91,13 +96,17 @@
   .block.B{ background: var(--b); }
   .block.C{ background: var(--c); }
   .block.D{ background: var(--d); }
+  .block.E{ background: var(--e); }
+  .block.F{ background: var(--f); }
+  
+  /* 選項太多時字體稍微縮小 */
   .block .letter{
-    font-size: clamp(34px, 9vw, 56px); font-weight:900; color: rgba(0,0,0,0.78);
+    font-size: clamp(28px, 8vw, 56px); font-weight:900; color: rgba(0,0,0,0.78);
     line-height:1;
   }
   .block .opt-text{
-    font-size: clamp(14px, 3.6vw, 18px); font-weight:700; color: rgba(0,0,0,0.78);
-    padding: 0 18px; text-align:center; line-height:1.3;
+    font-size: clamp(13px, 3vw, 18px); font-weight:700; color: rgba(0,0,0,0.78);
+    padding: 0 14px; text-align:center; line-height:1.2;
   }
   .block.disabled{ opacity:0.35; pointer-events:none; }
   .block.chosen{ outline: 5px solid rgba(244,241,234,0.85); outline-offset:-5px; }
@@ -114,20 +123,26 @@
   .disp-qtext{
     font-size: clamp(28px, 4.2vw, 52px); font-weight:800; line-height:1.3; margin: 4px 0 36px;
   }
-  .disp-options{
-    flex:1; display:grid; grid-template-columns:1fr 1fr; gap:22px;
-  }
+  
+  /* 動態網格：大螢幕端 */
+  .disp-options{ flex:1; display:grid; gap:22px; }
+  .cols-2 { grid-template-columns:1fr 1fr; }
+  .cols-3 { grid-template-columns:1fr 1fr 1fr; } /* 6個選項時一排3個 */
+
   .disp-opt{
-    border-radius:24px; padding: 28px 32px; display:flex; flex-direction:column; justify-content:space-between;
+    border-radius:24px; padding: 24px 28px; display:flex; flex-direction:column; justify-content:space-between;
     position:relative; overflow:hidden; min-height:140px;
   }
   .disp-opt.A{ background: var(--a); }
   .disp-opt.B{ background: var(--b); }
   .disp-opt.C{ background: var(--c); }
   .disp-opt.D{ background: var(--d); }
+  .disp-opt.E{ background: var(--e); }
+  .disp-opt.F{ background: var(--f); }
+  
   .disp-opt-top{ display:flex; align-items:center; gap:16px; }
-  .disp-opt-letter{ font-size:40px; font-weight:900; color:rgba(0,0,0,0.78); }
-  .disp-opt-text{ font-size: clamp(18px,2.6vw,28px); font-weight:700; color:rgba(0,0,0,0.78); line-height:1.3; }
+  .disp-opt-letter{ font-size:36px; font-weight:900; color:rgba(0,0,0,0.78); }
+  .disp-opt-text{ font-size: clamp(16px,2vw,24px); font-weight:700; color:rgba(0,0,0,0.78); line-height:1.3; }
   .disp-opt-bar-track{
     height:14px; border-radius:8px; background:rgba(0,0,0,0.18); overflow:hidden; margin-top:18px;
   }
@@ -137,10 +152,6 @@
   }
   .disp-opt-pct{ font-size:22px; font-weight:800; color:rgba(0,0,0,0.82); margin-top:10px; }
   .disp-idle{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
-  .disp-link-pill{
-    background:var(--panel); border:1px solid var(--line); border-radius:999px;
-    padding:14px 28px; font-size:18px; color:var(--ink); margin-top:8px;
-  }
 
   /* ===== 主持人控制 control ===== */
   .ctrl-wrap{ min-height:100vh; padding: 18px 16px 120px; max-width:560px; margin:0 auto; }
@@ -202,11 +213,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 
 <script type="module">
-  // 1. 只留 Firebase 核心與即時資料庫
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
   import { getDatabase, ref, set, get, onValue } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-database.js";
 
-  // 2. 你的專屬金鑰 (把 measurementId 移除了)
+  // ⚠️ 記得把這裡換回您的金鑰與 databaseURL
   const firebaseConfig = {
     apiKey: "AIzaSyC-V1EYB9AWU2-vGpou2ucufDPgRV5Q9mQ",
     authDomain: "ssr-vote.firebaseapp.com",
@@ -217,11 +227,9 @@
     databaseURL: "https://ssr-vote-default-rtdb.asia-southeast1.firebasedatabase.app"
   };
 
-  // 3. 啟動 Firebase 服務
   const app = initializeApp(firebaseConfig);
   const db = getDatabase(app); 
 
-  // 4. 打包給 React 使用
   window.fbStorage = {
     get: async (path) => {
       const snapshot = await get(ref(db, path));
@@ -241,54 +249,69 @@
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
 
-const LETTERS = ["A","B","C","D"];
-const COLORS = { A:"var(--a)", B:"var(--b)", C:"var(--c)", D:"var(--d)" };
+// 擴充全域字母與顏色設定，最高支援到 F (6選項)
+const ALL_LETTERS = ["A","B","C","D","E","F"];
+const COLORS = { A:"var(--a)", B:"var(--b)", C:"var(--c)", D:"var(--d)", E:"var(--e)", F:"var(--f)" };
 
+// 預設 5 題：1-4題為4個選項，第5題為6個選項
 const DEFAULT_QUESTIONS = [
-  { text: "今天活動最讓你期待的環節是？", options: ["開場表演","主題分享","互動遊戲","抽獎時間"] },
-  { text: "你平常最常使用哪一種交通方式通勤？", options: ["開車","捷運/公車","機車","步行/騎車"] },
-  { text: "猜猜看，今天現場大概有多少人？", options: ["50 人以下","50-100 人","100-200 人","200 人以上"] },
+  { text: "1. 暖身題：今天活動最讓你期待的環節是？", options: ["開場表演","主題分享","互動遊戲","抽獎時間"] },
+  { text: "2. 你平常最常使用哪一種交通方式通勤？", options: ["開車","捷運/公車","機車","步行/騎車"] },
+  { text: "3. 猜猜看，今天現場大概有多少人？", options: ["50 人以下","50-100 人","100-200 人","200 人以上"] },
+  { text: "4. 如果可以獲得一項超能力，你想要哪個？", options: ["瞬間移動","讀心術","隱形","穿越時空"] },
+  { text: "5. 終極魔王題：以下哪一個是你最不能接受的食物？", options: ["香菜","三色豆","夏威夷披薩","芋頭","茄子","苦瓜"] }
 ];
 
 function uid(){
   return "g" + Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4);
 }
-
 function getParam(name){
   return new URLSearchParams(window.location.search).get(name);
 }
 
+// 解析器升級：支援 A-F
 function parseQuestionBank(text){
   const blocks = text.split(/\n\s*\n/).map(b => b.trim()).filter(Boolean);
   const out = [];
   blocks.forEach(block => {
     const lines = block.split("\n").map(l => l.trim()).filter(Boolean);
     let qtext = "";
-    const opts = { A:"", B:"", C:"", D:"" };
+    const opts = [];
     lines.forEach(line => {
-      const m = line.match(/^([QABCD]):\s*(.*)$/i);
+      const m = line.match(/^([QABCDEF]):\s*(.*)$/i);
       if(!m) return;
       const tag = m[1].toUpperCase();
       const val = m[2].trim();
       if(tag === "Q") qtext = val;
-      else opts[tag] = val;
+      else {
+        const idx = ALL_LETTERS.indexOf(tag);
+        if(idx !== -1) opts[idx] = val;
+      }
     });
-    if(qtext && opts.A && opts.B && opts.C && opts.D){
-      out.push({ text: qtext, options: [opts.A, opts.B, opts.C, opts.D] });
+    // 過濾掉空選項，讓選項數量可動態變化 (2~6)
+    const validOpts = opts.filter(Boolean);
+    if(qtext && validOpts.length >= 2){
+      out.push({ text: qtext, options: validOpts });
     }
   });
   return out;
 }
+
 function questionsToText(qs){
-  return qs.map(q => `Q: ${q.text}\nA: ${q.options[0]}\nB: ${q.options[1]}\nC: ${q.options[2]}\nD: ${q.options[3]}`).join("\n\n");
+  return qs.map(q => {
+    let res = `Q: ${q.text}\n`;
+    q.options.forEach((opt, i) => {
+      res += `${ALL_LETTERS[i]}: ${opt}\n`;
+    });
+    return res.trim();
+  }).join("\n\n");
 }
 
 /* ================= 來賓畫面 ================= */
 function GuestView(){
-  // 狀態新增 correctAnswer
   const [state, setState] = useState({ qIndex:-1, phase:"idle", correctAnswer:"" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
-  const [guestId] = useState(uid()); // 每次重整都會取得全新 ID
+  const [guestId] = useState(uid()); 
   const [votedFor, setVotedFor] = useState({}); 
   const [submitting, setSubmitting] = useState(false);
 
@@ -296,12 +319,8 @@ function GuestView(){
     const checkTimer = setInterval(() => {
       if (window.fbStorage) {
         clearInterval(checkTimer);
-        window.fbStorage.listen("state", (val) => {
-          if (val) setState(val);
-        });
-        window.fbStorage.listen("questions", (val) => {
-          if (val) setQuestions(val);
-        });
+        window.fbStorage.listen("state", (val) => { if (val) setState(val); });
+        window.fbStorage.listen("questions", (val) => { if (val) setQuestions(val); });
       }
     }, 100);
     return () => clearInterval(checkTimer);
@@ -327,10 +346,9 @@ function GuestView(){
     );
   }
 
-  const q = questions[state.qIndex] || { text:"", options:["","","",""] };
+  const q = questions[state.qIndex] || { text:"", options:[] };
   const myChoice = votedFor[state.qIndex];
-
-  // 攔截 results (統計中) 與 reveal_answer (揭曉答案)
+  
   if(state.phase === "results" || state.phase === "reveal_answer"){
     const isRevealed = state.phase === "reveal_answer";
     return (
@@ -340,11 +358,13 @@ function GuestView(){
           {isRevealed ? `正確解答是：${state.correctAnswer}` : (myChoice ? "已收到你的答案" : "本題作答已截止")}
         </div>
         <div className="sub">請抬頭看大螢幕上的最終結果！</div>
-        {/* 揭曉後就不顯示轉圈圈了 */}
         {!isRevealed && <div className="spinner"></div>}
       </div>
     );
   }
+
+  // 自動判斷網格排列：超過4個選項就用 2x3 的 grid6
+  const gridClass = q.options.length > 4 ? "grid6" : "grid4";
 
   return (
     <div className="guest-wrap">
@@ -352,8 +372,9 @@ function GuestView(){
         <div className="guest-qnum">第 {state.qIndex+1} 題</div>
         <div className="guest-qtext">{q.text}</div>
       </div>
-      <div className="grid4">
-        {LETTERS.map((L, i) => {
+      <div className={`grid-layout ${gridClass}`}>
+        {q.options.map((optText, i) => {
+          const L = ALL_LETTERS[i];
           const disabled = !!myChoice && myChoice !== L;
           const chosen = myChoice === L;
           return (
@@ -364,7 +385,7 @@ function GuestView(){
               disabled={!!myChoice}
             >
               <div className="letter">{L}</div>
-              <div className="opt-text">{q.options[i]}</div>
+              <div className="opt-text">{optText}</div>
             </button>
           );
         })}
@@ -375,38 +396,29 @@ function GuestView(){
     </div>
   );
 }
+
 /* ================= 投影畫面 ================= */
 function DisplayView(){
-  // 加上 correctAnswer 狀態，準備接收控制台傳來的正確答案
-  const [state, setState] = useState({ qIndex:-1, phase:"idle", correctAnswer:"A" });
+  const [state, setState] = useState({ qIndex:-1, phase:"idle", correctAnswer:"" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
-  const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
-
-  // 🔥 關鍵補回：這一行保證了 Firebase 異步回傳投票數據時，永遠知道現在是第幾題
+  
+  // 紀錄6個選項的票數
+  const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0,E:0,F:0 });
   window.currentQIndexRef = state.qIndex;
 
   useEffect(() => {
     const checkTimer = setInterval(() => {
       if (window.fbStorage) {
         clearInterval(checkTimer);
-        
-        window.fbStorage.listen("state", (s) => {
-          if (s) setState(s);
-        });
-
-        window.fbStorage.listen("questions", (qs) => {
-          if (qs) setQuestions(qs);
-        });
-
-        // 核心：即時監聽當前題目的投票狀況並統計
+        window.fbStorage.listen("state", (s) => { if (s) setState(s); });
+        window.fbStorage.listen("questions", (qs) => { if (qs) setQuestions(qs); });
         window.fbStorage.listen("votes", (allVotes) => {
           if (!allVotes) {
-            setCounts({ A:0, B:0, C:0, D:0 });
+            setCounts({ A:0,B:0,C:0,D:0,E:0,F:0 });
             return;
           }
-          // 使用全域變數來抓取當前題目的所有答案，避免 React 狀態閉包延遲
           const currentQuestionVotes = allVotes[window.currentQIndexRef] || {};
-          const c = { A:0, B:0, C:0, D:0 };
+          const c = { A:0,B:0,C:0,D:0,E:0,F:0 };
           Object.values(currentQuestionVotes).forEach(choice => {
             if (c.hasOwnProperty(choice)) c[choice]++;
           });
@@ -414,11 +426,10 @@ function DisplayView(){
         });
       }
     }, 100);
-
     return () => clearInterval(checkTimer);
   }, []);
 
-  const total = counts.A + counts.B + counts.C + counts.D;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const pct = (n) => total === 0 ? 0 : Math.round((n/total)*100);
 
   if(state.phase === "idle" || state.qIndex < 0){
@@ -433,7 +444,10 @@ function DisplayView(){
     );
   }
 
-  const q = questions[state.qIndex] || { text:"", options:["","","",""] };
+  const q = questions[state.qIndex] || { text:"", options:[] };
+  
+  // 大螢幕動態網格：超過4題用 3x2 排列
+  const colsClass = q.options.length > 4 ? "cols-3" : "cols-2";
 
   return (
     <div className="disp-wrap">
@@ -445,10 +459,11 @@ function DisplayView(){
         </div>
       </div>
       <div className="disp-qtext">{q.text}</div>
-      <div className="disp-options">
-        {LETTERS.map((L, i) => {
-          const n = counts[L];
-          // 判斷：是否處於揭曉答案階段，且此選項就是正確答案
+      
+      <div className={`disp-options ${colsClass}`}>
+        {q.options.map((optText, i) => {
+          const L = ALL_LETTERS[i];
+          const n = counts[L] || 0;
           const isCorrectReveal = (state.phase === "reveal_answer" && state.correctAnswer === L);
 
           return (
@@ -456,11 +471,9 @@ function DisplayView(){
               <div>
                 <div className="disp-opt-top">
                   <div className="disp-opt-letter">{L}</div>
-                  <div className="disp-opt-text">{q.options[i]}</div>
+                  <div className="disp-opt-text">{optText}</div>
                 </div>
               </div>
-              
-              {/* 兩階段顯示邏輯：只要是 results 或 reveal_answer 階段，就秀出長條圖與百分比 */}
               {(state.phase === "results" || state.phase === "reveal_answer") ? (
                 <div>
                   <div className="disp-opt-bar-track">
@@ -479,10 +492,9 @@ function DisplayView(){
 
 /* ================= 主持人控制畫面 ================= */
 function ControlView(){
-  // 狀態新增了 correctAnswer 用來紀錄主持人點選的解答
   const [state, setState] = useState({ qIndex:-1, phase:"idle", correctAnswer:"" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
-  const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
+  const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0,E:0,F:0 });
   const [tab, setTab] = useState("run"); 
   const [qaText, setQaText] = useState(questionsToText(DEFAULT_QUESTIONS));
   const [toast, setToast] = useState("");
@@ -498,25 +510,17 @@ function ControlView(){
     const checkTimer = setInterval(() => {
       if (window.fbStorage) {
         clearInterval(checkTimer);
-        
-        window.fbStorage.listen("state", (s) => {
-          if (s) setState(s);
-        });
-
+        window.fbStorage.listen("state", (s) => { if (s) setState(s); });
         window.fbStorage.listen("questions", (qs) => {
-          if (qs) {
-            setQuestions(qs);
-            setQaText(questionsToText(qs));
-          }
+          if (qs) { setQuestions(qs); setQaText(questionsToText(qs)); }
         });
-
         window.fbStorage.listen("votes", (allVotes) => {
           if (!allVotes) {
-            setCounts({ A:0, B:0, C:0, D:0 });
+            setCounts({ A:0,B:0,C:0,D:0,E:0,F:0 });
             return;
           }
           const currentQuestionVotes = allVotes[window.currentQIndexRef] || {};
-          const c = { A:0, B:0, C:0, D:0 };
+          const c = { A:0,B:0,C:0,D:0,E:0,F:0 };
           Object.values(currentQuestionVotes).forEach(choice => {
             if (c.hasOwnProperty(choice)) c[choice]++;
           });
@@ -524,33 +528,27 @@ function ControlView(){
         });
       }
     }, 100);
-
     return () => clearInterval(checkTimer);
   }, []);
 
   window.currentQIndexRef = state.qIndex;
 
-  const total = counts.A + counts.B + counts.C + counts.D;
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
   const pct = (n) => total === 0 ? 0 : Math.round((n/total)*100);
 
   const startQuestion = async (idx) => {
     if(idx < 0 || idx >= questions.length) return;
-    const newState = { qIndex: idx, phase: "voting", correctAnswer: "" };
-    await window.fbStorage.set("state", newState);
+    await window.fbStorage.set("state", { qIndex: idx, phase: "voting", correctAnswer: "" });
     showToast(`第 ${idx+1} 題已強勢開跑`);
   };
   
-  // 第一階段：只公布比例
   const showResults = async () => {
-    const newState = { qIndex: state.qIndex, phase: "results", correctAnswer: "" };
-    await window.fbStorage.set("state", newState);
+    await window.fbStorage.set("state", { qIndex: state.qIndex, phase: "results", correctAnswer: "" });
     showToast("大螢幕已揭曉統計數據");
   };
 
-  // 🔥 第二階段：揭曉正確答案 (將主持人的選擇推上雲端)
   const revealAnswer = async (ans) => {
-    const newState = { qIndex: state.qIndex, phase: "reveal_answer", correctAnswer: ans };
-    await window.fbStorage.set("state", newState);
+    await window.fbStorage.set("state", { qIndex: state.qIndex, phase: "reveal_answer", correctAnswer: ans });
     showToast(`全場嗨起來！正確答案是 ${ans}`);
   };
   
@@ -617,8 +615,10 @@ function ControlView(){
             <div className="ctrl-card">
               <div className="ctrl-qnum">第 {state.qIndex+1} 題</div>
               <div className="ctrl-qtext">{q.text}</div>
-              {LETTERS.map((L,i) => {
-                // 控制台也給點視覺回饋，讓主持人知道目前亮起的是哪個答案
+              
+              {/* 動態渲染控制台選項 */}
+              {q.options.map((optText, i) => {
+                const L = ALL_LETTERS[i];
                 const isCorrect = (state.phase === "reveal_answer" && state.correctAnswer === L);
                 return (
                   <div className="ctrl-opt-row" key={L}>
@@ -627,7 +627,7 @@ function ControlView(){
                       outline: isCorrect ? "3px solid white" : "none",
                       outlineOffset: "-1px"
                     }}>{L}</div>
-                    <div className="txt" style={{ fontWeight: isCorrect ? "bold" : "normal" }}>{q.options[i]}</div>
+                    <div className="txt" style={{ fontWeight: isCorrect ? "bold" : "normal" }}>{optText}</div>
                     {(state.phase === "results" || state.phase === "reveal_answer") && (
                       <React.Fragment>
                         <div className="bar"><div className="bar-fill" style={{width:pct(counts[L])+"%", background:COLORS[L]}}></div></div>
@@ -638,9 +638,9 @@ function ControlView(){
                   </div>
                 );
               })}
+              
               <div className="hint">{state.phase==="voting" ? `台下已有 ${total} 人搶答` : `總計回收 ${total} 張選票`}</div>
 
-              {/* 🔥 兩階段按鈕控制區塊 */}
               <div style={{marginTop: 18}}>
                 {state.phase === "voting" && (
                   <div className="btn-row">
@@ -653,12 +653,17 @@ function ControlView(){
                     <div className="hint" style={{ marginTop: 0, marginBottom: 8, color: "var(--ink)", fontWeight: 700 }}>
                       2. 請點擊下方按鈕，揭曉正確答案：
                     </div>
-                    <div style={{ display: "flex", gap: "8px" }}>
-                      {LETTERS.map(L => (
-                        <button key={L} className="btn btn-secondary" style={{ padding: "10px", fontSize: "14px" }} onClick={() => revealAnswer(L)}>
-                          {L} 是解答
-                        </button>
-                      ))}
+                    
+                    {/* 動態產生揭曉按鈕，2排排列避免太擁擠 */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                      {q.options.map((_, i) => {
+                        const L = ALL_LETTERS[i];
+                        return (
+                          <button key={L} className="btn btn-secondary" style={{ padding: "10px", fontSize: "14px" }} onClick={() => revealAnswer(L)}>
+                            {L} 是解答
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -682,7 +687,7 @@ function ControlView(){
         <div className="ctrl-card">
           <div className="ctrl-qtext" style={{marginBottom:8}}>動態題庫調整</div>
           <div className="hint" style={{marginTop:0, marginBottom:10}}>
-            格式：題目與選項佔一行，用空白行隔開題型。
+            格式：題目與選項佔一行，用空白行隔開題型。最高支援至選項 F。
           </div>
           <textarea
             className="qa-input"

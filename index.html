@@ -371,9 +371,13 @@ function GuestView(){
 
 /* ================= 投影畫面 ================= */
 function DisplayView(){
-  const [state, setState] = useState({ qIndex:-1, phase:"idle" });
+  // 加上 correctAnswer 狀態，準備接收控制台傳來的正確答案
+  const [state, setState] = useState({ qIndex:-1, phase:"idle", correctAnswer:"A" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
   const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
+
+  // 🔥 關鍵補回：這一行保證了 Firebase 異步回傳投票數據時，永遠知道現在是第幾題
+  window.currentQIndexRef = state.qIndex;
 
   useEffect(() => {
     const checkTimer = setInterval(() => {
@@ -394,7 +398,7 @@ function DisplayView(){
             setCounts({ A:0, B:0, C:0, D:0 });
             return;
           }
-          // 抓取當前題目的所有答案
+          // 使用全域變數來抓取當前題目的所有答案，避免 React 狀態閉包延遲
           const currentQuestionVotes = allVotes[window.currentQIndexRef] || {};
           const c = { A:0, B:0, C:0, D:0 };
           Object.values(currentQuestionVotes).forEach(choice => {
@@ -407,9 +411,6 @@ function DisplayView(){
 
     return () => clearInterval(checkTimer);
   }, []);
-
-  // 運用一個全域的黑客手段讓 Firebase 異步回傳時能拿到最新的題號
-  window.currentQIndexRef = state.qIndex;
 
   const total = counts.A + counts.B + counts.C + counts.D;
   const pct = (n) => total === 0 ? 0 : Math.round((n/total)*100);
@@ -441,15 +442,20 @@ function DisplayView(){
       <div className="disp-options">
         {LETTERS.map((L, i) => {
           const n = counts[L];
+          // 判斷：是否處於揭曉答案階段，且此選項就是正確答案
+          const isCorrectReveal = (state.phase === "reveal_answer" && state.correctAnswer === L);
+
           return (
-            <div key={L} className={`disp-opt ${L}`}>
+            <div key={L} className={`disp-opt ${L} ${isCorrectReveal ? 'is-correct' : ''}`}>
               <div>
                 <div className="disp-opt-top">
                   <div className="disp-opt-letter">{L}</div>
                   <div className="disp-opt-text">{q.options[i]}</div>
                 </div>
               </div>
-              {state.phase === "results" ? (
+              
+              {/* 兩階段顯示邏輯：只要是 results 或 reveal_answer 階段，就秀出長條圖與百分比 */}
+              {(state.phase === "results" || state.phase === "reveal_answer") ? (
                 <div>
                   <div className="disp-opt-bar-track">
                     <div className="disp-opt-bar-fill" style={{ width: pct(n) + "%" }}></div>
@@ -467,7 +473,8 @@ function DisplayView(){
 
 /* ================= 主持人控制畫面 ================= */
 function ControlView(){
-  const [state, setState] = useState({ qIndex:-1, phase:"idle" });
+  // 狀態新增了 correctAnswer 用來紀錄主持人點選的解答
+  const [state, setState] = useState({ qIndex:-1, phase:"idle", correctAnswer:"" });
   const [questions, setQuestions] = useState(DEFAULT_QUESTIONS);
   const [counts, setCounts] = useState({ A:0,B:0,C:0,D:0 });
   const [tab, setTab] = useState("run"); 
@@ -522,15 +529,23 @@ function ControlView(){
 
   const startQuestion = async (idx) => {
     if(idx < 0 || idx >= questions.length) return;
-    const newState = { qIndex: idx, phase: "voting" };
+    const newState = { qIndex: idx, phase: "voting", correctAnswer: "" };
     await window.fbStorage.set("state", newState);
     showToast(`第 ${idx+1} 題已強勢開跑`);
   };
   
+  // 第一階段：只公布比例
   const showResults = async () => {
-    const newState = { qIndex: state.qIndex, phase: "results" };
+    const newState = { qIndex: state.qIndex, phase: "results", correctAnswer: "" };
     await window.fbStorage.set("state", newState);
     showToast("大螢幕已揭曉統計數據");
+  };
+
+  // 🔥 第二階段：揭曉正確答案 (將主持人的選擇推上雲端)
+  const revealAnswer = async (ans) => {
+    const newState = { qIndex: state.qIndex, phase: "reveal_answer", correctAnswer: ans };
+    await window.fbStorage.set("state", newState);
+    showToast(`全場嗨起來！正確答案是 ${ans}`);
   };
   
   const nextQuestion = async () => {
@@ -540,32 +555,21 @@ function ControlView(){
   };
   
   const resetAll = async () => {
-    await window.fbStorage.set("state", { qIndex: -1, phase: "idle" });
-    await window.fbStorage.set("votes", null); // 清空投票數據
+    await window.fbStorage.set("state", { qIndex: -1, phase: "idle", correctAnswer: "" });
+    await window.fbStorage.set("votes", null); 
     showToast("活動已全面重置歸零");
   };
   
-const saveBank = async () => {
+  const saveBank = async () => {
     const parsed = parseQuestionBank(qaText);
-    
-    // 🔥 除錯檢查：如果解析出來是空的，直接跳出警示
-    if (!parsed || parsed.length === 0) {
-      showToast("解析失敗！請確認格式是否正確");
-      console.log("解析結果:", parsed); // 按 F12 在 Console 看細節
+    if(parsed.length === 0){
+      showToast("格式偵測有誤，請再檢查一下");
       return;
     }
-    
-    try {
-      console.log("嘗試寫入雲端:", parsed);
-      await window.fbStorage.set("questions", parsed);
-      await window.fbStorage.set("state", { qIndex: -1, phase: "idle" });
-      showToast(`成功匯入 ${parsed.length} 道新題目`);
-      setTab("run");
-    } catch (e) {
-      // 🔥 除錯檢查：如果 Firebase 寫入失敗，直接把錯誤顯示出來
-      showToast("雲端儲存失敗: " + e.message);
-      console.error("Firebase 錯誤:", e);
-    }
+    await window.fbStorage.set("questions", parsed);
+    await window.fbStorage.set("state", { qIndex: -1, phase: "idle", correctAnswer: "" });
+    showToast(`成功匯入 ${parsed.length} 道新題目`);
+    setTab("run");
   };
 
   const q = state.qIndex >= 0 ? questions[state.qIndex] : null;
@@ -585,7 +589,11 @@ const saveBank = async () => {
       {tab === "run" && (
         <React.Fragment>
           <div className="ctrl-progress">
-            當前節奏：{state.phase==="idle"?"冷場等待中":state.phase==="voting"?"瘋狂作答中":"開票結果中"}
+            當前節奏：{
+              state.phase==="idle" ? "冷場等待中" : 
+              state.phase==="voting" ? "瘋狂作答中" : 
+              state.phase==="results" ? "比例統計中" : "答案揭曉中"
+            }
             {state.qIndex>=0 && ` · 第 ${state.qIndex+1} / ${questions.length} 題`}
           </div>
 
@@ -603,29 +611,58 @@ const saveBank = async () => {
             <div className="ctrl-card">
               <div className="ctrl-qnum">第 {state.qIndex+1} 題</div>
               <div className="ctrl-qtext">{q.text}</div>
-              {LETTERS.map((L,i) => (
-                <div className="ctrl-opt-row" key={L}>
-                  <div className="ctrl-swatch" style={{background:COLORS[L]}}>{L}</div>
-                  <div className="txt">{q.options[i]}</div>
-                  {state.phase === "results" && (
-                    <React.Fragment>
-                      <div className="bar"><div className="bar-fill" style={{width:pct(counts[L])+"%", background:COLORS[L]}}></div></div>
-                      <div className="cnt">{pct(counts[L])}%</div>
-                    </React.Fragment>
-                  )}
-                  {state.phase === "voting" && <div className="cnt">{counts[L]} 票</div>}
-                </div>
-              ))}
+              {LETTERS.map((L,i) => {
+                // 控制台也給點視覺回饋，讓主持人知道目前亮起的是哪個答案
+                const isCorrect = (state.phase === "reveal_answer" && state.correctAnswer === L);
+                return (
+                  <div className="ctrl-opt-row" key={L}>
+                    <div className="ctrl-swatch" style={{
+                      background: COLORS[L], 
+                      outline: isCorrect ? "3px solid white" : "none",
+                      outlineOffset: "-1px"
+                    }}>{L}</div>
+                    <div className="txt" style={{ fontWeight: isCorrect ? "bold" : "normal" }}>{q.options[i]}</div>
+                    {(state.phase === "results" || state.phase === "reveal_answer") && (
+                      <React.Fragment>
+                        <div className="bar"><div className="bar-fill" style={{width:pct(counts[L])+"%", background:COLORS[L]}}></div></div>
+                        <div className="cnt">{pct(counts[L])}%</div>
+                      </React.Fragment>
+                    )}
+                    {state.phase === "voting" && <div className="cnt">{counts[L]} 票</div>}
+                  </div>
+                );
+              })}
               <div className="hint">{state.phase==="voting" ? `台下已有 ${total} 人搶答` : `總計回收 ${total} 張選票`}</div>
 
-              <div className="btn-row" style={{marginTop:14}}>
+              {/* 🔥 兩階段按鈕控制區塊 */}
+              <div style={{marginTop: 18}}>
                 {state.phase === "voting" && (
-                  <button className="btn btn-primary" onClick={showResults}>切換到結果開票</button>
+                  <div className="btn-row">
+                    <button className="btn btn-primary" onClick={showResults}>1. 鎖定作答並公布比例</button>
+                  </div>
                 )}
+                
                 {state.phase === "results" && (
-                  <button className="btn btn-primary" onClick={nextQuestion} disabled={state.qIndex+1>=questions.length}>
-                    推進到下一題
-                  </button>
+                  <div style={{ background: "rgba(255,255,255,0.05)", padding: "12px", borderRadius: "12px", border: "1px solid var(--line)" }}>
+                    <div className="hint" style={{ marginTop: 0, marginBottom: 8, color: "var(--ink)", fontWeight: 700 }}>
+                      2. 請點擊下方按鈕，揭曉正確答案：
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      {LETTERS.map(L => (
+                        <button key={L} className="btn btn-secondary" style={{ padding: "10px", fontSize: "14px" }} onClick={() => revealAnswer(L)}>
+                          {L} 是解答
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {state.phase === "reveal_answer" && (
+                  <div className="btn-row">
+                    <button className="btn btn-primary" onClick={nextQuestion} disabled={state.qIndex+1>=questions.length}>
+                      推進到下一題
+                    </button>
+                  </div>
                 )}
               </div>
             </div>

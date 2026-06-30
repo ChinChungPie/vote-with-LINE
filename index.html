@@ -202,8 +202,8 @@
 
 <script type="module">
   // 初始化 Firebase 並導出到 window 全域，讓下方的 React 腳本可以使用
-  import { initializeApp } from "firebase/app";
-  import { getDatabase, ref, set, get, onValue } from "firebase/database";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+  import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-analytics.js";
 
   // ⚠️ 請在這裡貼上你在 Firebase 後台拿到的應用程式金鑰
   const firebaseConfig = {
@@ -215,8 +215,8 @@
     appId: "1:580523113201:web:0b118e943681686f4b4750",
     measurementId: "G-L25EKCM1L3"
   };
-
   const app = initializeApp(firebaseConfig);
+  const analytics = getAnalytics(app);
   const db = getDatabase(app);
 
   // 把 Firebase 的操作打包成原本 React 組件看得懂的 Promise 函數
